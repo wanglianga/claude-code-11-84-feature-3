@@ -39,6 +39,17 @@ public final class DbJson {
         }
     }
 
+    @SuppressWarnings("unchecked")
+    public static List<Object> toList(Object pg) {
+        if (pg == null) return List.of();
+        try {
+            String text = pg instanceof PGobject pgo ? pgo.getValue() : pg.toString();
+            return OM.readValue(text, List.class);
+        } catch (Exception e) {
+            throw new IllegalStateException("JSONB 解析失败: " + e.getMessage(), e);
+        }
+    }
+
     public static String json(Object o) {
         try { return OM.writeValueAsString(o); } catch (Exception e) { throw new IllegalStateException(e); }
     }

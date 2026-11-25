@@ -8,9 +8,11 @@ import QueryPage from './pages/QueryPage'
 import OfflinePage from './pages/OfflinePage'
 import HistoryPage from './pages/HistoryPage'
 import GovernancePage from './pages/GovernancePage'
+import ExplainPage from './pages/ExplainPage'
 
 const NAV = [
   { key: 'query', label: '受控查询' },
+  { key: 'explain', label: '排序解释与稳定性' },
   { key: 'catalog', label: '字段目录' },
   { key: 'mapping', label: '映射契约' },
   { key: 'forms', label: '表单与证据链' },
@@ -61,6 +63,7 @@ export default function App() {
       </aside>
       <main className="main">
         {page === 'query' && <QueryPage />}
+        {page === 'explain' && <ExplainPage />}
         {page === 'catalog' && <CatalogPage />}
         {page === 'mapping' && <MappingPage />}
         {page === 'forms' && <FormsPage />}

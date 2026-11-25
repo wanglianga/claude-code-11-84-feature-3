@@ -171,3 +171,41 @@ CREATE TABLE IF NOT EXISTS extension_request (
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     approved_at       TIMESTAMPTZ
 );
+
+-- ============ 特征3：高风险场所排序的规则解释与稳定性 ============
+
+-- 排序评分规则（可版本化；规则更新与已声明单调关系的冲突由解释服务检验）
+CREATE TABLE IF NOT EXISTS scoring_rule (
+    rule_id              VARCHAR(64) NOT NULL,
+    version              INT NOT NULL,
+    title                VARCHAR(128) NOT NULL,
+    target_field         VARCHAR(64) NOT NULL,        -- 规则消费的市级标准字段
+    rule_type            VARCHAR(16) NOT NULL,        -- ENUM_BRANCH / NUMERIC_BRANCH
+    branches_json        JSONB NOT NULL,              -- [{"op":">=","value":20,"points":30,"label":"…"}]
+    default_points       INT NOT NULL DEFAULT 0,
+    monotonic_direction  VARCHAR(16) NOT NULL,        -- NONE / ASC / DESC：已声明安全单调方向
+    status               VARCHAR(16) NOT NULL DEFAULT 'ACTIVE', -- ACTIVE / SUPERSEDED
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (rule_id, version)
+);
+
+-- 已声明安全单调关系：字段沿 direction 变化时，得分/等级允许的变化方向
+CREATE TABLE IF NOT EXISTS monotonic_declaration (
+    declaration_id  VARCHAR(64) PRIMARY KEY,
+    field_id        VARCHAR(64) NOT NULL,
+    direction       VARCHAR(16) NOT NULL,             -- ASC / DESC
+    scope           VARCHAR(16) NOT NULL,             -- SCORE / GRADE
+    enum_order_json JSONB,                            -- 枚举字段的有序取值（数值字段为 NULL）
+    note            TEXT NOT NULL,
+    active          BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+-- 解释/稳定性报告留痕（审计：谁在何时对哪个场所做了何种解释计算）
+CREATE TABLE IF NOT EXISTS explain_report (
+    report_id    BIGSERIAL PRIMARY KEY,
+    username     VARCHAR(64) NOT NULL,
+    case_id      VARCHAR(64),
+    method       VARCHAR(32) NOT NULL,
+    request_json JSONB NOT NULL DEFAULT '{}',
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);

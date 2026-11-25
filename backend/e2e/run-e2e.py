@@ -173,5 +173,84 @@ check("演进后 JIA 计数仍=4", group(r2, "JIA")["count"], 4)
 check("演进后可发布总数仍=9", r2["disclosure"]["total"], 9)
 check("演进后 YI 仍被抑制", group(r2, "YI")["suppressed"], True)
 
+print("=== 场景8：高风险场所排序——解释图/贡献/缺失/替换/单位/单调性/稳定性 ===")
+EXQ = "asOf=2026-05-20&purpose=STAT"
+def venue(ranking, case_id):
+    return next(v for v in ranking["ranking"] if v["caseId"] == case_id)
+
+# 8.1 排序与评分口径（固定场所断言，不受离线合并/治理批准状态影响）
+_, rk = call("GET", f"/api/explain/ranking?{EXQ}&method=PATH", CITY)
+v001 = venue(rk, "J-2026-001")
+check("J-2026-001 评分=55（限期20+裂缝12mm档15+未整改20）", v001["score"], 55)
+check("J-2026-001 等级 ORANGE", v001["grade"], "ORANGE")
+check("排序结果带规则版本清单", all(x.startswith("RULE_") for x in rk["ruleVersions"]) and len(rk["ruleVersions"]) == 4, True)
+_, rk_sh = call("GET", f"/api/explain/ranking?{EXQ}&method=SHAPLEY", CITY)
+sh = venue(rk_sh, "J-2026-001")["contributions"]
+check("Shapley 三玩家8次联盟评估", sh["coalitionEvaluations"], 8)
+check("Shapley 分级效用效率成立", sh["efficiencyCheck"]["pass"], True)
+check("Shapley 分数尺度与路径归因一致", sh["efficiencyCheck"]["scoreScaleMatchesPath"], True)
+
+# 8.2 规则解释图
+_, g001 = call("GET", f"/api/explain/venues/J-2026-001/graph?{EXQ}", CITY)
+check("解释图总分55", g001["score"], 55)
+node_types = {n["type"] for n in g001["nodes"]}
+check("解释图含 SOURCE/STD/RULE/SCORE 节点", {"SOURCE", "STD", "RULE", "SCORE"} <= node_types, True)
+src_node = next(n for n in g001["nodes"] if n["type"] == "SOURCE")
+check("源节点携带提交时版本与现行状态", "fieldDefVersionAtSubmit" in src_node and "fieldStatusNow" in src_node, True)
+
+# 8.3 缺失情景：Y-2026-004 等级语义未决（事件UNMAPPED+代码4拒绝），有批准路径→区间且可翻转
+_, ms = call("GET", f"/api/explain/venues/Y-2026-004/scenarios/missing?field=std.hazard_level&{EXQ}", CITY)
+check("缺失情景给出分数区间且上限>下限", ms["scoreInterval"]["max"] > ms["scoreInterval"]["min"], True)
+check("缺失补全可使名次翻转→只给 best/worst 区间", ms["rankFlipPossible"] is True and "rankInterval" in ms, True)
+check("不可达取值不产生分数", all(s["score"] is None for s in ms["scenarios"] if s["status"] == "UNREACHABLE"), True)
+
+# 8.4 替换情景：废止字段守卫 + 等价拒绝 + 基线行
+_, ref = call("GET", f"/api/explain/venues/Y-2026-002/scenarios/substitution?field=yi.risk_level&useCurrentMeaning=true&{EXQ}", CITY)
+check("废止字段按现行含义回算历史→REFUSED", ref["guard"]["refusal"], "REFUSED")
+_, sub = call("GET", f"/api/explain/venues/Y-2026-001/scenarios/substitution?field=yi.risk_level&useCurrentMeaning=false&{EXQ}", CITY)
+check("代码4无市级等价→REJECTED", any(s["status"] == "REJECTED" for s in sub["scenarios"]), True)
+check("当前取值保留 BASELINE 行", any(s["status"] == "BASELINE" for s in sub["scenarios"]), True)
+
+# 8.5 单位换算：批准换算可计算，无批准换算 BLOCKED
+_, us = call("GET", f"/api/explain/venues/Y-2026-001/scenarios/unit?field=yi.crack_width_cm&{EXQ}", CITY)
+comp = [s for s in us["scenarios"] if s["status"] == "COMPUTED"]
+blk = [s for s in us["scenarios"] if s["status"] == "BLOCKED"]
+check("1.2cm 经批准 x*10 换算为 12mm", len(comp) == 1 and comp[0]["extra"]["convertedValue"] == "12", True)
+check("无批准 x*1 直取 BLOCKED 且不进贡献", len(blk) == 1 and blk[0]["extra"]["blockedFromContribution"] is True, True)
+_, us2 = call("GET", f"/api/explain/venues/J-2026-001/scenarios/unit?field=std.crack_width_mm&{EXQ}", CITY)
+check("市级标准字段恒等换算 COMPUTED", us2["scenarios"][0]["status"], "COMPUTED")
+
+# 8.6 稳定性报告
+_, st = call("GET", f"/api/explain/venues/Y-2026-001/stability?{EXQ}", CITY)
+check("稳定性报告基线分43", st["baseline"]["score"], 43)
+check("报告含三类情景与阻塞/拒绝统计",
+      {"missingScenarios", "substitutionScenarios", "unitScenarios"} <= set(st.keys())
+      and "blockedConversions" in st["stability"], True)
+
+# 8.7 单调性检验：扫描/更新候选/漂移
+_, sw = call("GET", "/api/explain/monotonicity/rules", CITY)
+check("现行规则全部通过单调扫描", sw["pass"] is True and sw["violationCount"] == 0, True)
+bad_rule = {"ruleId": "RULE_CRACK", "candidateVersion": 2, "targetField": "std.crack_width_mm",
+            "ruleType": "NUMERIC_BRANCH",
+            "branches": [{"op": ">=", "value": 20, "points": 10, "label": "反向"},
+                         {"op": ">=", "value": 10, "points": 30, "label": "反向"}],
+            "defaultPoints": 0, "monotonicDirection": "ASC"}
+_, ru_bad = call("POST", "/api/explain/monotonicity/rule-update", CITY, bad_rule)
+check("违反单调声明的候选规则被拒", ru_bad["decision"], "REJECTED_MONOTONIC_BREACH")
+good_rule = dict(bad_rule, branches=[{"op": ">=", "value": 20, "points": 30, "label": "高"},
+                                     {"op": ">=", "value": 10, "points": 15, "label": "中"}])
+_, ru_good = call("POST", "/api/explain/monotonicity/rule-update", CITY, good_rule)
+check("合规候选规则可接受", ru_good["decision"], "ACCEPTABLE")
+_, drift = call("GET", f"/api/explain/monotonicity/drift?{EXQ}", CITY)
+check("实证扰动无单调违反", drift["pass"] is True, True)
+check("漂移清单识别 yi.risk_level 同名不同义",
+      any(d["sourceField"] == "yi.risk_level" for d in drift["driftedFieldUses"]), True)
+
+# 8.8 访问策略同口径
+_, rj = call("GET", f"/api/explain/ranking?{EXQ}", JIA)
+check("甲区分析员只见 JIA 场所", all(v["district"] == "JIA" for v in rj["ranking"]) and len(rj["ranking"]) > 0, True)
+code, _ = call("GET", "/api/explain/ranking?asOf=2026-05-20&purpose=STAT", AUD)
+check("审计员无 STAT 目的被拒(422)", code, 422)
+
 print(f"\n============ 汇总: PASS={PASS} FAIL={FAIL} ============")
 sys.exit(1 if FAIL else 0)

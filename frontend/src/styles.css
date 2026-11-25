@@ -106,3 +106,13 @@ pre.json { background: #1d2733; color: #d6e2ee; padding: 14px; border-radius: 10
 details { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin-bottom: 8px; background: #fcfdfe; }
 details summary { cursor: pointer; font-weight: 600; }
 .badge-ver { font-family: monospace; background: #202936; color: #fff; border-radius: 6px; padding: 1px 7px; font-size: 12px; }
+
+/* 规则解释图节点流 */
+.graph-flow { display: flex; flex-wrap: wrap; gap: 10px; }
+.graph-node {
+  border: 2px solid var(--line); border-radius: 10px; padding: 0 0 10px;
+  min-width: 170px; max-width: 230px; background: #fcfdfe; overflow: hidden;
+}
+.graph-type { color: #fff; font-size: 11px; font-weight: 700; padding: 3px 8px; letter-spacing: .5px; }
+.graph-label { font-weight: 700; font-size: 13px; padding: 8px 10px 4px; word-break: break-all; }
+.graph-node .small { padding: 0 10px; line-height: 1.6; }

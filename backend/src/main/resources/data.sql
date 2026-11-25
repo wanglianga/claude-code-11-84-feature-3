@@ -198,3 +198,41 @@ ON CONFLICT DO NOTHING;
 INSERT INTO audit_log(username,action,detail) VALUES
  ('system','BOOTSTRAP','{"note":"种子数据加载：4 类场景、16 件表单、10 份契约"}')
 ON CONFLICT DO NOTHING;
+
+-- ============ 特征3：高风险场所排序评分规则与单调声明 ============
+-- 规则总分 = 各规则分支得分之和；分级带：>=70 红 / >=50 橙 / >=30 黄 / >=10 蓝 / 其余未入级
+INSERT INTO scoring_rule(rule_id,version,title,target_field,rule_type,branches_json,default_points,monotonic_direction,status) VALUES
+ ('RULE_HAZARD',1,'隐患等级赋分','std.hazard_level','ENUM_BRANCH',
+  '[{"op":"=","value":"MAJOR","points":40,"label":"重大隐患 +40"},
+    {"op":"=","value":"LIMITED","points":20,"label":"限期整改 +20"},
+    {"op":"=","value":"OBSERVE","points":8,"label":"需观察 +8"},
+    {"op":"=","value":"RESCINDED","points":0,"label":"已撤销 +0"}]',
+  0,'ASC','ACTIVE'),
+ ('RULE_CRACK',1,'裂缝宽度分档赋分','std.crack_width_mm','NUMERIC_BRANCH',
+  '[{"op":">=","value":20,"points":30,"label":"裂缝≥20mm +30"},
+    {"op":">=","value":10,"points":15,"label":"10mm≤裂缝<20mm +15"}]',
+  0,'ASC','ACTIVE'),
+ ('RULE_RECT',1,'未整改赋分','std.rectification_status','ENUM_BRANCH',
+  '[{"op":"=","value":"OPEN","points":20,"label":"未整改 +20"},
+    {"op":"=","value":"RECTIFIED","points":0,"label":"已整改 +0"}]',
+  0,'ASC','ACTIVE'),
+ ('RULE_EV_CHARGE',1,'电动车违规充电赋分','std.ev_charge_hazard','ENUM_BRANCH',
+  '[{"op":"=","value":"PRESENT","points":15,"label":"存在违规充电 +15"},
+    {"op":"=","value":"ABSENT","points":0,"label":"未发现 +0"}]',
+  0,'ASC','ACTIVE')
+ON CONFLICT DO NOTHING;
+
+-- 已声明安全单调关系：沿 direction 的字段序，得分不得反向（规则更新与实证扰动均据此检验）
+INSERT INTO monotonic_declaration(declaration_id,field_id,direction,scope,enum_order_json,note,active) VALUES
+ ('DECL_HAZARD','std.hazard_level','ASC','SCORE',
+  '["RESCINDED","OBSERVE","LIMITED","MAJOR"]',
+  '隐患严重度沿 撤销→观察→限期整改→重大 上升时，排序得分不得下降',TRUE),
+ ('DECL_CRACK','std.crack_width_mm','ASC','SCORE',NULL,
+  '裂缝宽度数值增大时得分不得下降（数值字段无需枚举序）',TRUE),
+ ('DECL_RECT','std.rectification_status','ASC','SCORE',
+  '["RECTIFIED","OPEN"]',
+  '沿 已整改→未整改 序得分不得下降',TRUE),
+ ('DECL_EV_CHARGE','std.ev_charge_hazard','ASC','SCORE',
+  '["ABSENT","PRESENT"]',
+  '从“未发现”到“存在”违规充电，得分不得下降',TRUE)
+ON CONFLICT DO NOTHING;
